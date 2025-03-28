@@ -3,7 +3,7 @@ name: Daily Download at 1PM MYT
 on:
   schedule:
     - cron: '0 5 * * *'   # 05:00 UTC = 13:00 MYT
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   run-download:
