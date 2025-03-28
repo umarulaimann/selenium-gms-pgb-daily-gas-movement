@@ -4,11 +4,11 @@ import time
 import shutil
 import traceback
 import logging
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo  # For Python 3.9+ time zone support
 import zipfile
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo  # Python 3.9+ time zone support
 
-# Force system time zone to Asia/Kuala_Lumpur (Linux/GitHub Actions)
+# Force system time zone to Asia/Kuala_Lumpur (required for GitHub Actions)
 os.environ['TZ'] = 'Asia/Kuala_Lumpur'
 time.tzset()
 
@@ -49,7 +49,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # Configure Chrome options for automatic downloading in headless mode
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Run headless (remove if you want to see the browser)
+chrome_options.add_argument("--headless")  # Remove this argument if you wish to see the browser
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
@@ -177,7 +177,7 @@ def click_export_button():
         logger.info(f"Export button not found or clickable: {e}. Skipping this network.")
         return False
 
-# Calculate dynamic dates
+# Calculate dynamic dates: start date = first day of current month, end date = tomorrow’s date.
 malaysia_tz = ZoneInfo("Asia/Kuala_Lumpur")
 now_in_malaysia = datetime.now(malaysia_tz)
 base_start_date = now_in_malaysia.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -215,6 +215,7 @@ for network in network_names:
         measurement_point_dropdown.click()
         measurement_point_options = wait.until(EC.presence_of_all_elements_located(
             (By.XPATH, "//ul[@id='MeasurePointDropDownList_listbox']/li")))
+        # Filter out empty entries
         measurement_point_names = [option.text.strip() for option in measurement_point_options if option.text.strip()]
         measurement_point_dropdown.click()  # collapse dropdown
         logger.info(f"For network '{network}', found {len(measurement_point_names)} measurement points: {measurement_point_names}")
@@ -308,7 +309,6 @@ logger.info(f"Skipped items count: {len(skipped_items)}")
 if downloaded_items:
     logger.info("Downloaded measurement points:")
     for item in downloaded_items:
-        # Log only the measurement point if available (split by ' - ')
         if " - " in item:
             mp = item.split(" - ")[1]
             logger.info(f" - {mp}")
