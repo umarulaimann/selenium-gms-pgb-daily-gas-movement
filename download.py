@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo  # For Python 3.9+ time zone support
 import zipfile
 
 # ---------------------------------------------------------------------------
-# Set system time zone to Asia/Kuala_Lumpur (required for Linux/GitHub Actions)
+# Set system time zone to Asia/Kuala_Lumpur (for Linux/GitHub Actions)
 os.environ['TZ'] = 'Asia/Kuala_Lumpur'
 time.tzset()
 
@@ -97,7 +97,7 @@ def login_and_navigate():
         login_button = wait.until(EC.element_to_be_clickable((By.NAME, "btnLogin")))
         login_button.click()
         time.sleep(2)
-        # Navigate to Certification tab then to PGB Daily Gas Movement
+        # Navigate via Certification tab to PGB Daily Gas Movement
         certification_tab = wait.until(EC.presence_of_element_located((By.LINK_TEXT, "Certification")))
         ActionChains(driver).move_to_element(certification_tab).click().perform()
         time.sleep(2)
@@ -157,19 +157,19 @@ def wait_for_download(old_files, timeout=120):
     return None
 
 # ---------------------------------------------------------------------------
-# Utility function to rename downloaded files
+# Utility function to rename downloaded files for measurement points
 def format_measurement_point_name(measurement_point):
     return f"PGB Daily Gas Movement - {measurement_point}.xlsx"
 
 # ---------------------------------------------------------------------------
-# Utility function to select an option from a dropdown
+# Utility function to select an option from a dropdown given its index and text
 def select_dropdown(dropdown_index, option_text):
     for attempt in range(3):
         try:
             dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
             dropdown.click()
             time.sleep(1)
-            option = wait.until(EC.presence_of_element_located((By.XPATH, f"//li[contains(text(), '{option_text}')]")))
+            option = wait.until(EC.presence_of_element_located((By.XPATH, f"//ul[contains(@id, 'listbox')]/li[contains(text(), '{option_text}')]")))
             option.click()
             logger.info(f"Successfully selected: {option_text}")
             return
@@ -179,7 +179,7 @@ def select_dropdown(dropdown_index, option_text):
     logger.error(f"Failed to select '{option_text}' after 3 attempts.")
 
 # ---------------------------------------------------------------------------
-# Utility function to set the date inputs
+# Utility function to set date inputs
 def set_date_input(date_str, start=True):
     try:
         date_input_id = "DataProviderDatePicker" if start else "EndDateDatePicker"
@@ -204,20 +204,23 @@ def click_export_button():
         return False
 
 # ---------------------------------------------------------------------------
-# Clear measurement point dropdown to a default state (e.g., "All")
-def clear_measurement_point_selection():
+# Retrieve measurement point options for the currently selected network
+def get_measurement_points():
     try:
+        # Click the measurement point dropdown (assumed to be at index 2)
         measurement_point_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[2]")))
         measurement_point_dropdown.click()
-        time.sleep(1)
-        # Try to select an "All" option if available.
-        default_option = wait.until(EC.presence_of_element_located(
-            (By.XPATH, "//ul[@id='MeasurePointDropDownList_listbox']/li[contains(text(), 'All')]")
-        ))
-        default_option.click()
-        logger.info("Cleared measurement point selection to default 'All'.")
+        # Allow extra time for the list to populate
+        time.sleep(2)
+        measurement_point_options = wait.until(
+            EC.presence_of_all_elements_located((By.XPATH, "//ul[contains(@id, 'MeasurePointDropDownList_listbox')]/li"))
+        )
+        measurement_point_names = [option.text.strip() for option in measurement_point_options if option.text.strip()]
+        measurement_point_dropdown.click()  # collapse the dropdown
+        return measurement_point_names
     except Exception as e:
-        logger.error(f"Failed to clear measurement point selection: {e}")
+        logger.error(f"Error retrieving measurement points: {e}")
+        return []
 
 # ---------------------------------------------------------------------------
 # Calculate dynamic date range using Malaysia time zone
@@ -229,7 +232,7 @@ end_date_str = f"{end_date.day:02d}/{end_date.month:02d}/{end_date.year}"
 logger.info(f"Dynamic date range - Start: {start_date_str}, End: {end_date_str}")
 
 # ---------------------------------------------------------------------------
-# Start the process by logging in and navigating
+# Begin by logging in and navigating to the target page
 try:
     login_and_navigate()
 except Exception as e:
@@ -237,7 +240,7 @@ except Exception as e:
     driver.quit()
     raise e
 
-# Retrieve network names from the dropdown
+# Retrieve network names from the network dropdown
 try:
     network_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[1]")))
     network_dropdown.click()
@@ -255,110 +258,62 @@ downloaded_networks = []
 skipped_networks = []
 timeout_networks = []
 
-# Process each network and, if available, its measurement points
+# Process each network by retrieving its measurement points and then processing each one
 for network in network_names:
     select_dropdown(1, network)
     time.sleep(2)
+    measurement_point_names = get_measurement_points()
+    logger.info(f"For network '{network}', found {len(measurement_point_names)} measurement points: {measurement_point_names}")
     
-    # Retrieve measurement point options
-    try:
-        measurement_point_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[2]")))
-        measurement_point_dropdown.click()
-        measurement_point_options = wait.until(EC.presence_of_all_elements_located(
-            (By.XPATH, "//ul[@id='MeasurePointDropDownList_listbox']/li")
-        ))
-        measurement_point_names = [option.text.strip() for option in measurement_point_options if option.text.strip()]
-        measurement_point_dropdown.click()  # collapse dropdown
-        logger.info(f"For network '{network}', found {len(measurement_point_names)} measurement points: {measurement_point_names}")
-    except Exception as e:
-        logger.error(f"Error retrieving measurement points for network '{network}': {e}")
-        measurement_point_names = []
+    if not measurement_point_names:
+        logger.error(f"Measurement points not found for network '{network}'. Skipping...")
+        skipped_networks.append(network)
+        continue
     
-    if measurement_point_names:
-        for measurement_point in measurement_point_names:
-            network_retries = 0
-            max_network_retries = 3
-            processed = False
-            while not processed and network_retries < max_network_retries:
-                try:
-                    logger.info(f"Processing measurement point: {measurement_point} for network: {network} (Attempt {network_retries+1}/{max_network_retries})")
-                    old_files = os.listdir(base_download_dir)
-                    select_dropdown(2, measurement_point)
-                    time.sleep(2)
-                    set_date_input(start_date_str, start=True)
-                    set_date_input(end_date_str, start=False)
-                    search_button = wait.until(EC.element_to_be_clickable((By.ID, "search")))
-                    search_button.click()
-                    if not wait_for_loading(timeout=300, network_name=network):
-                        timeout_networks.append(f"{network} - {measurement_point}")
-                    if not click_export_button():
-                        logger.info(f"Skipping measurement point '{measurement_point}' for network '{network}' due to no export button.")
-                        skipped_networks.append(f"{network} - {measurement_point}")
-                        processed = True
-                        break
-                    downloaded_file = wait_for_download(old_files)
-                    if downloaded_file:
-                        new_file_path = os.path.join(base_download_dir, format_measurement_point_name(measurement_point))
-                        shutil.move(downloaded_file, new_file_path)
-                        logger.info(f"Renamed '{downloaded_file}' to '{new_file_path}'")
-                        downloaded_networks.append(f"{measurement_point}")
-                    else:
-                        logger.info(f"No file downloaded for measurement point '{measurement_point}' of network '{network}'.")
-                        skipped_networks.append(f"{network} - {measurement_point}")
-                    time.sleep(5)
-                    processed = True
-                except WebDriverException as wde:
-                    network_retries += 1
-                    logger.warning(f"WebDriverException for measurement point '{measurement_point}' of network '{network}': {wde}. Reinitializing driver and retrying...")
-                    reinitialize_driver()
-                except Exception as e:
-                    logger.error(f"Exception for measurement point '{measurement_point}' of network '{network}': {e}. Skipping this combination.")
-                    skipped_networks.append(f"{network} - {measurement_point}")
-                    processed = True
-    else:
+    for measurement_point in measurement_point_names:
         network_retries = 0
         max_network_retries = 3
         processed = False
         while not processed and network_retries < max_network_retries:
             try:
-                logger.info(f"Processing network: {network} with no measurement point (Attempt {network_retries+1}/{max_network_retries})")
+                logger.info(f"Processing measurement point: {measurement_point} for network: {network} (Attempt {network_retries+1}/{max_network_retries})")
                 old_files = os.listdir(base_download_dir)
+                # Select the measurement point explicitly
+                select_dropdown(2, measurement_point)
                 time.sleep(2)
-                # Clear any previous measurement point selection to avoid stale data
-                clear_measurement_point_selection()
                 set_date_input(start_date_str, start=True)
                 set_date_input(end_date_str, start=False)
                 search_button = wait.until(EC.element_to_be_clickable((By.ID, "search")))
                 search_button.click()
                 if not wait_for_loading(timeout=300, network_name=network):
-                    timeout_networks.append(network)
+                    timeout_networks.append(f"{network} - {measurement_point}")
                 if not click_export_button():
-                    logger.info(f"Skipping network '{network}' due to no export button.")
-                    skipped_networks.append(network)
+                    logger.info(f"Skipping measurement point '{measurement_point}' for network '{network}' due to no export button.")
+                    skipped_networks.append(f"{network} - {measurement_point}")
                     processed = True
                     break
                 downloaded_file = wait_for_download(old_files)
                 if downloaded_file:
-                    new_file_path = os.path.join(base_download_dir, f"PGB Daily Gas Movement - {network}.xlsx")
+                    new_file_path = os.path.join(base_download_dir, format_measurement_point_name(measurement_point))
                     shutil.move(downloaded_file, new_file_path)
                     logger.info(f"Renamed '{downloaded_file}' to '{new_file_path}'")
-                    downloaded_networks.append(network)
+                    downloaded_networks.append(f"{measurement_point}")
                 else:
-                    logger.info(f"No file downloaded for network '{network}'.")
-                    skipped_networks.append(network)
+                    logger.info(f"No file downloaded for measurement point '{measurement_point}' of network '{network}'.")
+                    skipped_networks.append(f"{network} - {measurement_point}")
                 time.sleep(5)
                 processed = True
             except WebDriverException as wde:
                 network_retries += 1
-                logger.warning(f"WebDriverException for network '{network}': {wde}. Reinitializing driver and retrying...")
+                logger.warning(f"WebDriverException for measurement point '{measurement_point}' of network '{network}': {wde}. Reinitializing driver and retrying...")
                 reinitialize_driver()
             except Exception as e:
-                logger.error(f"Exception for network '{network}': {e}. Skipping network.")
-                skipped_networks.append(network)
+                logger.error(f"Exception for measurement point '{measurement_point}' of network '{network}': {e}. Skipping this combination.")
+                skipped_networks.append(f"{network} - {measurement_point}")
                 processed = True
 
 # ---------------------------------------------------------------------------
-# Log summary of the processing
+# Log summary of processing
 logger.info("\n=== Summary ===")
 logger.info(f"Total networks processed: {len(network_names)}")
 logger.info(f"Downloaded items count: {len(downloaded_networks)}")
@@ -368,11 +323,7 @@ logger.info(f"Items with page load timeout: {len(timeout_networks)}")
 if downloaded_networks:
     logger.info("Downloaded measurement points:")
     for item in downloaded_networks:
-        if " - " in item:
-            mp = item.split(" - ")[1]
-            logger.info(f" - {mp}")
-        else:
-            logger.info(f" - {item}")
+        logger.info(f" - {item}")
 else:
     logger.info("No items were downloaded.")
 
