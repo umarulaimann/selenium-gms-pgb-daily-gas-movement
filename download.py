@@ -82,15 +82,16 @@ def init_driver():
 init_driver()
 
 # ---------------------------------------------------------------------------
-# Verify that a dropdown's visible text matches the expected value.
+# Verification function (allows partial matching)
 def verify_selection(dropdown_index, expected_text):
     try:
         dropdown = wait.until(EC.visibility_of_element_located((By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
         current = dropdown.text.strip()
-        if current == expected_text:
+        # Check if the expected text is a substring of the current text.
+        if expected_text in current:
             return True
         else:
-            logger.warning(f"Verification failed: Expected '{expected_text}', got '{current}'")
+            logger.warning(f"Verification failed: Expected '{expected_text}' to be in '{current}'")
             return False
     except Exception as e:
         logger.error(f"Error verifying selection: {e}")
@@ -109,7 +110,6 @@ def select_dropdown(dropdown_index, option_text):
             ))
             option.click()
             time.sleep(1)
-            # Verify the selection
             if verify_selection(dropdown_index, option_text):
                 logger.info(f"Successfully selected: {option_text}")
                 return
@@ -213,7 +213,7 @@ def login_and_navigate():
         login_button = wait.until(EC.element_to_be_clickable((By.NAME, "btnLogin")))
         login_button.click()
         time.sleep(2)
-        # Navigate via Certification tab to PGB Daily Gas Movement
+        # Navigate via Certification tab to PGB Daily Gas Movement.
         certification_tab = wait.until(EC.presence_of_element_located((By.LINK_TEXT, "Certification")))
         ActionChains(driver).move_to_element(certification_tab).click().perform()
         time.sleep(2)
