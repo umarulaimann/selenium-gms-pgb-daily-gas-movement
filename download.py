@@ -82,7 +82,123 @@ def init_driver():
 init_driver()
 
 # ---------------------------------------------------------------------------
-# Login and navigate to "PGB Daily Gas Movement"
+# Verify that a dropdown's visible text matches the expected value.
+def verify_selection(dropdown_index, expected_text):
+    try:
+        dropdown = wait.until(EC.visibility_of_element_located((By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
+        current = dropdown.text.strip()
+        if current == expected_text:
+            return True
+        else:
+            logger.warning(f"Verification failed: Expected '{expected_text}', got '{current}'")
+            return False
+    except Exception as e:
+        logger.error(f"Error verifying selection: {e}")
+        return False
+
+# ---------------------------------------------------------------------------
+# Utility function to select an option from a dropdown given its index and text.
+def select_dropdown(dropdown_index, option_text):
+    for attempt in range(3):
+        try:
+            dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
+            dropdown.click()
+            time.sleep(1)
+            option = wait.until(EC.presence_of_element_located(
+                (By.XPATH, f"//ul[contains(@id, 'listbox')]/li[contains(text(), '{option_text}')]")
+            ))
+            option.click()
+            time.sleep(1)
+            # Verify the selection
+            if verify_selection(dropdown_index, option_text):
+                logger.info(f"Successfully selected: {option_text}")
+                return
+        except Exception:
+            logger.info(f"Attempt {attempt+1}: Failed to select '{option_text}', retrying...")
+            time.sleep(2)
+    logger.error(f"Failed to select '{option_text}' after 3 attempts.")
+
+# ---------------------------------------------------------------------------
+# Utility function to set date inputs.
+def set_date_input(date_str, start=True):
+    try:
+        date_input_id = "DataProviderDatePicker" if start else "EndDateDatePicker"
+        date_input = wait.until(EC.visibility_of_element_located((By.ID, date_input_id)))
+        time.sleep(1)
+        date_input.clear()
+        date_input.send_keys(date_str)
+        logger.info(f"Set {'start' if start else 'end'} date to {date_str}")
+    except Exception as e:
+        logger.error(f"Failed to set {'start' if start else 'end'} date: {e}")
+
+# ---------------------------------------------------------------------------
+# Utility function to click the export button.
+def click_export_button():
+    try:
+        export_button = wait.until(EC.element_to_be_clickable((By.ID, "PGBdailygasmovement-export")))
+        driver.execute_script("arguments[0].click();", export_button)
+        logger.info("Export button clicked.")
+        return True
+    except Exception as e:
+        logger.warning(f"Export button not found or clickable: {e}. Skipping this network.")
+        return False
+
+# ---------------------------------------------------------------------------
+# Wait for the page loading spinner to disappear.
+def wait_for_loading(timeout=300, network_name=""):
+    logger.info(f"Waiting for page to load for network '{network_name}'...")
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        try:
+            loading_elements = driver.find_elements(By.CLASS_NAME, "k-loading-image")
+            if not loading_elements:
+                logger.info("Page loading finished. Proceeding to export.")
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+    logger.warning(f"Timeout waiting for page to load for network '{network_name}'.")
+    return False
+
+# ---------------------------------------------------------------------------
+# Wait for the Excel file to appear in the download folder.
+def wait_for_download(old_files, timeout=120):
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        files = [f for f in os.listdir(base_download_dir) if f.endswith(".xlsx")]
+        new_files = list(set(files) - set(old_files))
+        if new_files:
+            downloaded_file = os.path.join(base_download_dir, new_files[0])
+            logger.info(f"Detected downloaded file: {downloaded_file}")
+            return downloaded_file
+        time.sleep(2)
+    logger.info("No downloaded file detected.")
+    return None
+
+# ---------------------------------------------------------------------------
+# Utility function to rename downloaded files for measurement points.
+def format_measurement_point_name(measurement_point):
+    return f"PGB Daily Gas Movement - {measurement_point}.xlsx"
+
+# ---------------------------------------------------------------------------
+# Retrieve measurement point options for the currently selected network.
+def get_measurement_points():
+    try:
+        measurement_point_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[2]")))
+        measurement_point_dropdown.click()
+        time.sleep(2)
+        measurement_point_options = wait.until(
+            EC.presence_of_all_elements_located((By.XPATH, "//ul[contains(@id, 'MeasurePointDropDownList_listbox')]/li"))
+        )
+        measurement_point_names = [option.text.strip() for option in measurement_point_options if option.text.strip()]
+        measurement_point_dropdown.click()  # collapse dropdown
+        return measurement_point_names
+    except Exception as e:
+        logger.error(f"Error retrieving measurement points: {e}")
+        return []
+
+# ---------------------------------------------------------------------------
+# Login and navigate to "PGB Daily Gas Movement".
 def login_and_navigate():
     try:
         driver.get("https://gms.gasmalaysia.com/pltgtm/cmd.openseal?openSEAL_ck=ViewHome")
@@ -109,7 +225,7 @@ def login_and_navigate():
         raise
 
 # ---------------------------------------------------------------------------
-# Reinitialize driver if needed
+# Reinitialize driver if needed.
 def reinitialize_driver():
     global driver, wait
     logger.info("Browser closed unexpectedly. Reinitializing driver...")
@@ -125,105 +241,7 @@ def reinitialize_driver():
         logger.error(f"Failed to reinitialize driver: {e}")
 
 # ---------------------------------------------------------------------------
-# Wait for the page loading spinner to disappear
-def wait_for_loading(timeout=300, network_name=""):
-    logger.info(f"Waiting for page to load for network '{network_name}'...")
-    end_time = time.time() + timeout
-    while time.time() < end_time:
-        try:
-            loading_elements = driver.find_elements(By.CLASS_NAME, "k-loading-image")
-            if not loading_elements:
-                logger.info("Page loading finished. Proceeding to export.")
-                return True
-        except Exception:
-            pass
-        time.sleep(1)
-    logger.warning(f"Timeout waiting for page to load for network '{network_name}'.")
-    return False
-
-# ---------------------------------------------------------------------------
-# Wait for the Excel file to appear in the download folder
-def wait_for_download(old_files, timeout=120):
-    end_time = time.time() + timeout
-    while time.time() < end_time:
-        files = [f for f in os.listdir(base_download_dir) if f.endswith(".xlsx")]
-        new_files = list(set(files) - set(old_files))
-        if new_files:
-            downloaded_file = os.path.join(base_download_dir, new_files[0])
-            logger.info(f"Detected downloaded file: {downloaded_file}")
-            return downloaded_file
-        time.sleep(2)
-    logger.info("No downloaded file detected.")
-    return None
-
-# ---------------------------------------------------------------------------
-# Utility function to rename downloaded files for measurement points
-def format_measurement_point_name(measurement_point):
-    return f"PGB Daily Gas Movement - {measurement_point}.xlsx"
-
-# ---------------------------------------------------------------------------
-# Utility function to select an option from a dropdown given its index and text
-def select_dropdown(dropdown_index, option_text):
-    for attempt in range(3):
-        try:
-            dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
-            dropdown.click()
-            time.sleep(1)
-            option = wait.until(EC.presence_of_element_located((By.XPATH, f"//ul[contains(@id, 'listbox')]/li[contains(text(), '{option_text}')]")))
-            option.click()
-            logger.info(f"Successfully selected: {option_text}")
-            return
-        except Exception:
-            logger.info(f"Attempt {attempt+1}: Failed to select '{option_text}', retrying...")
-            time.sleep(2)
-    logger.error(f"Failed to select '{option_text}' after 3 attempts.")
-
-# ---------------------------------------------------------------------------
-# Utility function to set date inputs
-def set_date_input(date_str, start=True):
-    try:
-        date_input_id = "DataProviderDatePicker" if start else "EndDateDatePicker"
-        date_input = wait.until(EC.visibility_of_element_located((By.ID, date_input_id)))
-        time.sleep(1)
-        date_input.clear()
-        date_input.send_keys(date_str)
-        logger.info(f"Set {'start' if start else 'end'} date to {date_str}")
-    except Exception as e:
-        logger.error(f"Failed to set {'start' if start else 'end'} date: {e}")
-
-# ---------------------------------------------------------------------------
-# Utility function to click the export button
-def click_export_button():
-    try:
-        export_button = wait.until(EC.element_to_be_clickable((By.ID, "PGBdailygasmovement-export")))
-        driver.execute_script("arguments[0].click();", export_button)
-        logger.info("Export button clicked.")
-        return True
-    except Exception as e:
-        logger.warning(f"Export button not found or clickable: {e}. Skipping this network.")
-        return False
-
-# ---------------------------------------------------------------------------
-# Retrieve measurement point options for the currently selected network
-def get_measurement_points():
-    try:
-        # Click the measurement point dropdown (assumed to be at index 2)
-        measurement_point_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[2]")))
-        measurement_point_dropdown.click()
-        # Allow extra time for the list to populate
-        time.sleep(2)
-        measurement_point_options = wait.until(
-            EC.presence_of_all_elements_located((By.XPATH, "//ul[contains(@id, 'MeasurePointDropDownList_listbox')]/li"))
-        )
-        measurement_point_names = [option.text.strip() for option in measurement_point_options if option.text.strip()]
-        measurement_point_dropdown.click()  # collapse the dropdown
-        return measurement_point_names
-    except Exception as e:
-        logger.error(f"Error retrieving measurement points: {e}")
-        return []
-
-# ---------------------------------------------------------------------------
-# Calculate dynamic date range using Malaysia time zone
+# Calculate dynamic date range using Malaysia time zone.
 malaysia_tz = ZoneInfo("Asia/Kuala_Lumpur")
 now_in_malaysia = datetime.now(malaysia_tz)
 start_date_str = f"01/{now_in_malaysia.month:02d}/{now_in_malaysia.year}"
@@ -232,7 +250,7 @@ end_date_str = f"{end_date.day:02d}/{end_date.month:02d}/{end_date.year}"
 logger.info(f"Dynamic date range - Start: {start_date_str}, End: {end_date_str}")
 
 # ---------------------------------------------------------------------------
-# Begin by logging in and navigating to the target page
+# Begin by logging in and navigating to the target page.
 try:
     login_and_navigate()
 except Exception as e:
@@ -240,7 +258,7 @@ except Exception as e:
     driver.quit()
     raise e
 
-# Retrieve network names from the network dropdown
+# Retrieve network names from the network dropdown.
 try:
     network_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[1]")))
     network_dropdown.click()
@@ -258,7 +276,7 @@ downloaded_networks = []
 skipped_networks = []
 timeout_networks = []
 
-# Process each network by retrieving its measurement points and then processing each one
+# Process each network by retrieving its measurement points and then processing each one.
 for network in network_names:
     select_dropdown(1, network)
     time.sleep(2)
@@ -278,7 +296,7 @@ for network in network_names:
             try:
                 logger.info(f"Processing measurement point: {measurement_point} for network: {network} (Attempt {network_retries+1}/{max_network_retries})")
                 old_files = os.listdir(base_download_dir)
-                # Select the measurement point explicitly
+                # Select the measurement point explicitly.
                 select_dropdown(2, measurement_point)
                 time.sleep(2)
                 set_date_input(start_date_str, start=True)
@@ -313,7 +331,7 @@ for network in network_names:
                 processed = True
 
 # ---------------------------------------------------------------------------
-# Log summary of processing
+# Log summary of processing.
 logger.info("\n=== Summary ===")
 logger.info(f"Total networks processed: {len(network_names)}")
 logger.info(f"Downloaded items count: {len(downloaded_networks)}")
@@ -345,7 +363,7 @@ driver.quit()
 logger.info("Driver quit. Script finished.")
 
 # ---------------------------------------------------------------------------
-# Compress downloaded files for GitHub Actions Artifact
+# Compress downloaded files for GitHub Actions Artifact.
 def compress_downloads_dir(directory, zip_filename):
     with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(directory):
