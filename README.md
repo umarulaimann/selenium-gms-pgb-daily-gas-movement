@@ -1,4 +1,5 @@
-# Selenium GMS PGB Daily Gas Movement
+# Selenium GMS PGB Daily Gas Movement Downloader
+
 This project automates the process of downloading and organizing data from the Gas Malaysia website’s "PGB Daily Gas Movement" section. The Python script uses Selenium WebDriver to log in, navigate dynamic dropdowns, set a dynamic date range, download Excel files for various networks and measurement points, rename the files appropriately, and finally compress them into a ZIP archive for artifact retrieval.
 
 ## Features
@@ -20,20 +21,3 @@ This project automates the process of downloading and organizing data from the G
 
 - **Headless Operation**  
   Designed to run in headless mode, making it ideal for continuous integration environments.
-
-## Prerequisites
-
-- **Python 3.9+**
-- **Google Chrome** (or a compatible Chromium-based browser)
-- **pip** (Python package installer)
-
-## Dependencies
-
-- [Selenium](https://pypi.org/project/selenium/)
-- [webdriver-manager](https://pypi.org/project/webdriver-manager/)
-
-Install the dependencies with:
-
-```bash
-pip install selenium webdriver-manager
-
