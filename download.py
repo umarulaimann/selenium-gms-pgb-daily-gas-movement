@@ -49,7 +49,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # Configure Chrome options for automatic downloading in headless mode
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Remove if you wish to see the browser
+chrome_options.add_argument("--headless")  # Remove this argument if you wish to see the browser
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
@@ -125,14 +125,16 @@ def wait_for_loading():
             pass
         time.sleep(1)
 
+# Wait for data to load in the results table.
 def wait_for_data(timeout=120):
     logger.info("Waiting for data to load in the results table...")
     end_time = time.time() + timeout
+    # Using the provided HTML structure: rows in the table inside a div with class "k-grid-content".
     data_xpath = "//div[contains(@class, 'k-grid-content')]//table//tbody//tr"
     while time.time() < end_time:
         try:
             rows = driver.find_elements(By.XPATH, data_xpath)
-            if len(rows) >= 1:
+            if len(rows) >= 1:  # At least one row implies data is present.
                 logger.info("Data loaded in the results table!")
                 return True
         except Exception as e:
@@ -161,10 +163,12 @@ def format_measurement_point_name(measurement_point):
 def select_dropdown(dropdown_index, option_text):
     for attempt in range(3):
         try:
-            dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
+            dropdown = wait.until(EC.element_to_be_clickable(
+                (By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
             dropdown.click()
             time.sleep(1)
-            option = wait.until(EC.presence_of_element_located((By.XPATH, f"//li[contains(text(), '{option_text}')]")))
+            option = wait.until(EC.presence_of_element_located(
+                (By.XPATH, f"//li[contains(text(), '{option_text}')]")))
             option.click()
             logger.info(f"Successfully selected: {option_text}")
             return
@@ -193,6 +197,7 @@ def click_export_button():
         logger.info(f"Export button not found or clickable: {e}. Skipping this network.")
         return False
 
+# Calculate dynamic dates: start date = first day of current month, end date = tomorrow’s date.
 malaysia_tz = ZoneInfo("Asia/Kuala_Lumpur")
 now_in_malaysia = datetime.now(malaysia_tz)
 base_start_date = now_in_malaysia.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -224,12 +229,14 @@ for network in network_names:
     select_dropdown(1, network)
     time.sleep(2)
     try:
+        # Use the container element to retrieve measurement point options.
         measurement_point_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[2]")))
         measurement_point_dropdown.click()
-        measurement_point_options = wait.until(EC.presence_of_all_elements_located(
-            (By.XPATH, "//ul[@id='MeasurePointDropDownList_listbox']/li")))
+        container = driver.find_element(By.XPATH, "//*[@id='MeasurePointDropDownList_listbox']")
+        measurement_point_options = container.find_elements(By.TAG_NAME, "li")
+        # Filter out empty entries.
         measurement_point_names = [option.text.strip() for option in measurement_point_options if option.text.strip()]
-        measurement_point_dropdown.click()  # collapse dropdown
+        measurement_point_dropdown.click()  # Collapse dropdown
         logger.info(f"For network '{network}', found {len(measurement_point_names)} measurement points: {measurement_point_names}")
     except Exception as e:
         logger.error(f"Error retrieving measurement points for network '{network}': {e}")
