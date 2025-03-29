@@ -104,14 +104,14 @@ def verify_selection(dropdown_index, expected_text):
 def select_dropdown(dropdown_index, option_text):
     for attempt in range(3):
         try:
+            # Click the dropdown to reveal options.
             dropdown = wait.until(EC.element_to_be_clickable(
                 (By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")
             ))
             dropdown.click()
-            listbox_xpath = "//ul[contains(@id, 'MeasurePointDropDownList_listbox')]" if dropdown_index == 2 else "//ul[contains(@id, 'NetworkCode_listbox')]"
-            wait.until(EC.presence_of_all_elements_located((By.XPATH, f"{listbox_xpath}/li")))
-            options = driver.find_elements(By.XPATH, f"{listbox_xpath}/li")
-            logger.info(f"Dropdown {dropdown_index} options: {[opt.text.strip() for opt in options]}")
+            time.sleep(3)
+            # Retrieve all options.
+            options = driver.find_elements(By.XPATH, "//ul[contains(@id, 'listbox')]/li")
             target_option = None
             for opt in options:
                 txt = opt.text.strip()
@@ -120,10 +120,15 @@ def select_dropdown(dropdown_index, option_text):
                     break
             if not target_option:
                 raise Exception(f"Option '{option_text}' not found in dropdown {dropdown_index}")
+            # Scroll the option into view.
             driver.execute_script("arguments[0].scrollIntoView(true);", target_option)
-            wait.until(EC.visibility_of(target_option))
-            wait.until(EC.element_to_be_clickable(target_option))
-            driver.execute_script("arguments[0].click();", target_option)
+            time.sleep(1)
+            # Try using ActionChains to click.
+            try:
+                ActionChains(driver).move_to_element(target_option).click(target_option).perform()
+            except Exception as e:
+                logger.info(f"ActionChains click failed for '{option_text}', trying JS click: {e}")
+                driver.execute_script("arguments[0].click();", target_option)
             time.sleep(1)
             if verify_selection(dropdown_index, option_text):
                 logger.info(f"Successfully selected: {option_text}")
