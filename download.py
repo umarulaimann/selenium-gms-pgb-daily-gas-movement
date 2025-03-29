@@ -82,44 +82,53 @@ def init_driver():
 init_driver()
 
 # ---------------------------------------------------------------------------
-# Verification function that allows partial matching.
+# Verification function (case‑insensitive check).
 def verify_selection(dropdown_index, expected_text):
     try:
         dropdown = wait.until(EC.visibility_of_element_located(
             (By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")
         ))
         current = dropdown.text.strip()
-        # Check if the expected text is contained in the current text.
-        if expected_text in current:
+        # Check if expected text is contained (case-insensitive) in current text.
+        if expected_text.lower() in current.lower():
             return True
         else:
-            logger.warning(f"Verification failed: Expected '{expected_text}' to be in '{current}'")
+            logger.warning(f"Verification failed: Expected '{expected_text}' in '{current}'")
             return False
     except Exception as e:
         logger.error(f"Error verifying selection: {e}")
         return False
 
 # ---------------------------------------------------------------------------
-# Utility function to select an option from a dropdown given its index and text.
+# Revised dropdown selection: uses multiple strategies.
 def select_dropdown(dropdown_index, option_text):
     for attempt in range(3):
         try:
+            # Click the dropdown to reveal options.
             dropdown = wait.until(EC.element_to_be_clickable(
                 (By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")
             ))
             dropdown.click()
             time.sleep(1)
-            option = wait.until(EC.presence_of_element_located(
-                (By.XPATH, f"//ul[contains(@id, 'listbox')]/li[contains(text(), '{option_text}')]")
-            ))
+            # Retrieve all options.
+            options = driver.find_elements(By.XPATH, "//ul[contains(@id, 'listbox')]/li")
+            target_option = None
+            for opt in options:
+                txt = opt.text.strip()
+                if option_text.lower() in txt.lower():
+                    target_option = opt
+                    break
+            if not target_option:
+                raise Exception(f"Option '{option_text}' not found in dropdown {dropdown_index}")
             # Scroll the option into view.
-            driver.execute_script("arguments[0].scrollIntoView(true);", option)
-            # Try a normal click first.
+            driver.execute_script("arguments[0].scrollIntoView(true);", target_option)
+            time.sleep(1)
+            # Try using ActionChains to click.
             try:
-                option.click()
+                ActionChains(driver).move_to_element(target_option).click(target_option).perform()
             except Exception as e:
-                logger.info(f"Normal click failed for '{option_text}', trying JS click. Exception: {e}")
-                driver.execute_script("arguments[0].click();", option)
+                logger.info(f"ActionChains click failed for '{option_text}', trying JS click: {e}")
+                driver.execute_script("arguments[0].click();", target_option)
             time.sleep(1)
             if verify_selection(dropdown_index, option_text):
                 logger.info(f"Successfully selected: {option_text}")
