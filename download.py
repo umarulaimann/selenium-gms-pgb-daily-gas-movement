@@ -49,7 +49,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # Configure Chrome options for automatic downloading in headless mode
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Remove this argument if you wish to see the browser
+chrome_options.add_argument("--headless")  # Remove if you wish to see the browser
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
@@ -124,6 +124,25 @@ def wait_for_loading():
         except Exception:
             pass
         time.sleep(1)
+
+# NEW: Wait for data to load in the results table using the provided HTML structure.
+def wait_for_data(timeout=120):
+    logger.info("Waiting for data to load in the results table...")
+    end_time = time.time() + timeout
+    # Use the provided HTML structure: rows inside the div with class "k-grid-content"
+    data_xpath = "//div[contains(@class, 'k-grid-content')]//table//tbody//tr"
+    while time.time() < end_time:
+        try:
+            rows = driver.find_elements(By.XPATH, data_xpath)
+            # Assume that if at least 1 row exists, data is present.
+            if len(rows) >= 1:
+                logger.info("Data loaded in the results table!")
+                return True
+        except Exception as e:
+            logger.error(f"Error while waiting for data: {e}")
+        time.sleep(1)
+    logger.warning("Timeout waiting for data to load in the results table.")
+    return False
 
 def wait_for_download(old_files):
     timeout = 120
@@ -239,6 +258,11 @@ for network in network_names:
                     search_button = wait.until(EC.element_to_be_clickable((By.ID, "search")))
                     search_button.click()
                     wait_for_loading()
+                    if not wait_for_data():
+                        logger.warning(f"No data loaded for measurement point '{measurement_point}' of network '{network}'.")
+                        skipped_items.append(f"{network} - {measurement_point}")
+                        processed = True
+                        break
                     if not click_export_button():
                         logger.info(f"Skipping measurement point '{measurement_point}' for network '{network}' due to no export button.")
                         skipped_items.append(f"{network} - {measurement_point}")
@@ -273,69 +297,4 @@ for network in network_names:
                 old_files = os.listdir(base_download_dir)
                 time.sleep(2)
                 set_date_input(start_date_str, start=True)
-                set_date_input(end_date_str, start=False)
-                search_button = wait.until(EC.element_to_be_clickable((By.ID, "search")))
-                search_button.click()
-                wait_for_loading()
-                if not click_export_button():
-                    logger.info(f"Skipping network '{network}' due to no export button.")
-                    skipped_items.append(network)
-                    processed = True
-                    break
-                downloaded_file = wait_for_download(old_files)
-                if downloaded_file:
-                    new_file_path = os.path.join(base_download_dir, f"PGB Daily Gas Movement - {network}.xlsx")
-                    shutil.move(downloaded_file, new_file_path)
-                    logger.info(f"Renamed '{downloaded_file}' to '{new_file_path}'")
-                    downloaded_items.append(network)
-                else:
-                    logger.info(f"No file downloaded for network '{network}'.")
-                    skipped_items.append(network)
-                time.sleep(5)
-                processed = True
-            except WebDriverException as wde:
-                retries += 1
-                logger.warning(f"WebDriverException for network '{network}': {wde}. Reinitializing driver and retrying...")
-                reinitialize_driver()
-            except Exception as e:
-                logger.error(f"Exception for network '{network}': {e}. Skipping network.")
-                skipped_items.append(network)
-                processed = True
-
-logger.info("\n=== Summary ===")
-logger.info(f"Total networks processed: {len(network_names)}")
-logger.info(f"Downloaded items count: {len(downloaded_items)}")
-logger.info(f"Skipped items count: {len(skipped_items)}")
-if downloaded_items:
-    logger.info("Downloaded measurement points:")
-    for item in downloaded_items:
-        if " - " in item:
-            mp = item.split(" - ")[1]
-            logger.info(f" - {mp}")
-        else:
-            logger.info(f" - {item}")
-else:
-    logger.info("No items were downloaded.")
-if skipped_items:
-    logger.info("Skipped items:")
-    for item in skipped_items:
-        logger.info(f" - {item}")
-else:
-    logger.info("All items were downloaded successfully.")
-
-driver.quit()
-logger.info("Driver quit. Script finished.")
-
-# Compress downloaded files into a ZIP artifact
-def compress_downloads_dir(directory, zip_filename):
-    with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(directory):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, start=directory)
-                zipf.write(file_path, arcname=arcname)
-    logger.info(f"Compressed files into {zip_filename}")
-
-zip_filename = os.path.join(base_local_dir, f"{current_month_folder}.zip")
-compress_downloads_dir(base_download_dir, zip_filename)
-logger.info("Artifact is ready.")
+                set_date_input
