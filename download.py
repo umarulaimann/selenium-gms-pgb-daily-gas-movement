@@ -109,7 +109,7 @@ def select_dropdown(dropdown_index, option_text):
                 (By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")
             ))
             dropdown.click()
-            time.sleep(1)
+            time.sleep(3)
             # Retrieve all options.
             options = driver.find_elements(By.XPATH, "//ul[contains(@id, 'listbox')]/li")
             target_option = None
