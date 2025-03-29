@@ -1,24 +1,27 @@
+#!/usr/bin/env python3
 import os
 import sys
 import time
 import shutil
 import traceback
 import logging
-import zipfile
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo  # Python 3.9+ time zone support
+from zoneinfo import ZoneInfo  # For Python 3.9+ time zone support
+import zipfile
 
-# Force system time zone to Asia/Kuala_Lumpur (required for GitHub Actions)
+# ---------------------------------------------------------------------------
+# Set system time zone to Asia/Kuala_Lumpur (required for Linux/GitHub Actions)
 os.environ['TZ'] = 'Asia/Kuala_Lumpur'
 time.tzset()
 
-# Configure logging: logs will be written to a file in the download directory.
-base_local_dir = r"C:\Users\umarul\OneDrive - Gas Malaysia Berhad\GMS Manual\PGB Daily Gas Movement (Billing)"
+# ---------------------------------------------------------------------------
+# Configure directories for downloads and logs
+base_local_dir = os.path.join(os.getcwd(), "downloads")
 current_month_folder = datetime.now().strftime("%B %Y")
-# Adjust folder structure as needed.
-base_download_dir = os.path.join(base_local_dir, "PGB Daily Gas Movement", f"3. March {datetime.now().year} - Test Umarul")
+base_download_dir = os.path.join(base_local_dir, current_month_folder)
 os.makedirs(base_download_dir, exist_ok=True)
 
+# Setup logging: logs will be written to a file in the download directory.
 log_filename = os.path.join(
     base_download_dir,
     f"Tracking Networks Downloaded and Skipped [{datetime.now().strftime('%Y-%m-%d')}].txt"
@@ -29,13 +32,17 @@ logging.basicConfig(
     filename=log_filename,
     filemode='w'
 )
-logger = logging.getLogger("CVDownloader")
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger = logging.getLogger()
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
 
 logger.info("Starting script...")
 
+# ---------------------------------------------------------------------------
+# Selenium and WebDriver imports
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -46,10 +53,10 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import WebDriverException, TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Configure Chrome options for automatic downloading (GUI mode enabled)
+# ---------------------------------------------------------------------------
+# Configure Chrome options for headless mode (GitHub Actions)
 chrome_options = Options()
-# Uncomment the next line if you want to run headless
-# chrome_options.add_argument("--headless")
+chrome_options.add_argument("--headless")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
@@ -64,29 +71,34 @@ chrome_prefs = {
 }
 chrome_options.add_experimental_option("prefs", chrome_prefs)
 
-FIXED_CHROME_DRIVER_VERSION = "134.0.6998.88"
-DRIVER_PATH = ChromeDriverManager(driver_version=FIXED_CHROME_DRIVER_VERSION).install()
-
+# ---------------------------------------------------------------------------
+# Initialize WebDriver
 def init_driver():
     global driver, wait
-    service = Service(DRIVER_PATH)
+    service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
     wait = WebDriverWait(driver, 30)
 
 init_driver()
 
+# ---------------------------------------------------------------------------
+# Login and navigate to "PGB Daily Gas Movement"
 def login_and_navigate():
     try:
         driver.get("https://gms.gasmalaysia.com/pltgtm/cmd.openseal?openSEAL_ck=ViewHome")
+        # Retrieve credentials from environment variables (or use defaults for local testing)
+        website_username = os.environ.get("WEBSITE_USERNAME", "pltadmin")
+        website_password = os.environ.get("WEBSITE_PASSWORD", "pltadmin@2020")
         username_field = wait.until(EC.visibility_of_element_located((By.ID, "UserCtrl")))
         password_field = wait.until(EC.visibility_of_element_located((By.ID, "PwdCtrl")))
-        username_field.send_keys("pltadmin")
+        username_field.send_keys(website_username)
         time.sleep(2)
-        password_field.send_keys("pltadmin@2020")
+        password_field.send_keys(website_password)
         time.sleep(2)
         login_button = wait.until(EC.element_to_be_clickable((By.NAME, "btnLogin")))
         login_button.click()
         time.sleep(2)
+        # Navigate to Certification tab then to PGB Daily Gas Movement
         certification_tab = wait.until(EC.presence_of_element_located((By.LINK_TEXT, "Certification")))
         ActionChains(driver).move_to_element(certification_tab).click().perform()
         time.sleep(2)
@@ -97,6 +109,8 @@ def login_and_navigate():
         logger.error(f"Login and navigation failed: {e}")
         raise
 
+# ---------------------------------------------------------------------------
+# Reinitialize driver if needed
 def reinitialize_driver():
     global driver, wait
     logger.info("Browser closed unexpectedly. Reinitializing driver...")
@@ -111,7 +125,9 @@ def reinitialize_driver():
     except Exception as e:
         logger.error(f"Failed to reinitialize driver: {e}")
 
-def wait_for_loading(timeout=3600, network_name=""):
+# ---------------------------------------------------------------------------
+# Wait for the page loading spinner to disappear
+def wait_for_loading(timeout=300, network_name=""):
     logger.info(f"Waiting for page to load for network '{network_name}'...")
     end_time = time.time() + timeout
     while time.time() < end_time:
@@ -126,23 +142,8 @@ def wait_for_loading(timeout=3600, network_name=""):
     logger.warning(f"Timeout waiting for page to load for network '{network_name}'.")
     return False
 
-# Wait for data to load in the results table using the provided HTML structure.
-def wait_for_data(timeout=120):
-    logger.info("Waiting for data to load in the results table...")
-    end_time = time.time() + timeout
-    data_xpath = "//div[contains(@class, 'k-grid-content')]//table//tbody//tr"
-    while time.time() < end_time:
-        try:
-            rows = driver.find_elements(By.XPATH, data_xpath)
-            if len(rows) >= 1:
-                logger.info("Data loaded in the results table!")
-                return True
-        except Exception as e:
-            logger.error(f"Error while waiting for data: {e}")
-        time.sleep(1)
-    logger.warning("Timeout waiting for data to load in the results table.")
-    return False
-
+# ---------------------------------------------------------------------------
+# Wait for the Excel file to appear in the download folder
 def wait_for_download(old_files, timeout=120):
     end_time = time.time() + timeout
     while time.time() < end_time:
@@ -156,18 +157,20 @@ def wait_for_download(old_files, timeout=120):
     logger.info("No downloaded file detected.")
     return None
 
+# ---------------------------------------------------------------------------
+# Utility function to rename downloaded files
 def format_measurement_point_name(measurement_point):
     return f"PGB Daily Gas Movement - {measurement_point}.xlsx"
 
+# ---------------------------------------------------------------------------
+# Utility function to select an option from a dropdown
 def select_dropdown(dropdown_index, option_text):
     for attempt in range(3):
         try:
-            dropdown = wait.until(EC.element_to_be_clickable(
-                (By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
+            dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, f"(//span[@class='k-input'])[{dropdown_index}]")))
             dropdown.click()
             time.sleep(1)
-            option = wait.until(EC.presence_of_element_located(
-                (By.XPATH, f"//li[contains(text(), '{option_text}')]")))
+            option = wait.until(EC.presence_of_element_located((By.XPATH, f"//li[contains(text(), '{option_text}')]")))
             option.click()
             logger.info(f"Successfully selected: {option_text}")
             return
@@ -176,6 +179,8 @@ def select_dropdown(dropdown_index, option_text):
             time.sleep(2)
     logger.error(f"Failed to select '{option_text}' after 3 attempts.")
 
+# ---------------------------------------------------------------------------
+# Utility function to set the date inputs
 def set_date_input(date_str, start=True):
     try:
         date_input_id = "DataProviderDatePicker" if start else "EndDateDatePicker"
@@ -187,6 +192,8 @@ def set_date_input(date_str, start=True):
     except Exception as e:
         logger.error(f"Failed to set {'start' if start else 'end'} date: {e}")
 
+# ---------------------------------------------------------------------------
+# Utility function to click the export button
 def click_export_button():
     try:
         export_button = wait.until(EC.element_to_be_clickable((By.ID, "PGBdailygasmovement-export")))
@@ -197,13 +204,17 @@ def click_export_button():
         logger.warning(f"Export button not found or clickable: {e}. Skipping this network.")
         return False
 
-# Calculate dynamic dates: start date = first day of current month, end date = tomorrow’s date.
-current_date = datetime.now()
-start_date_str = f"01/{current_date.month:02d}/{current_date.year}"
-end_date = current_date + timedelta(days=1)
+# ---------------------------------------------------------------------------
+# Calculate dynamic date range using Malaysia time zone
+malaysia_tz = ZoneInfo("Asia/Kuala_Lumpur")
+now_in_malaysia = datetime.now(malaysia_tz)
+start_date_str = f"01/{now_in_malaysia.month:02d}/{now_in_malaysia.year}"
+end_date = now_in_malaysia + timedelta(days=1)
 end_date_str = f"{end_date.day:02d}/{end_date.month:02d}/{end_date.year}"
 logger.info(f"Dynamic date range - Start: {start_date_str}, End: {end_date_str}")
 
+# ---------------------------------------------------------------------------
+# Start the process by logging in and navigating
 try:
     login_and_navigate()
 except Exception as e:
@@ -211,36 +222,37 @@ except Exception as e:
     driver.quit()
     raise e
 
-# Retrieve network names.
+# Retrieve network names from the dropdown
 try:
     network_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[1]")))
     network_dropdown.click()
     time.sleep(2)
     network_options = driver.find_elements(By.XPATH, "//ul[@id='NetworkCode_listbox']/li")
     network_names = [option.text for option in network_options]
-    network_dropdown.click()  # Collapse dropdown.
+    network_dropdown.click()  # collapse dropdown
     logger.info(f"Found {len(network_names)} networks: {network_names}")
 except Exception as e:
     logger.error(traceback.format_exc())
     driver.quit()
     raise e
 
-downloaded_items = []
-skipped_items = []
+downloaded_networks = []
+skipped_networks = []
 timeout_networks = []
 
-# Process each network – if measurement points exist, process each; otherwise, process the network.
+# Process each network and, if available, its measurement points
 for network in network_names:
     select_dropdown(1, network)
     time.sleep(2)
+    
+    # Retrieve measurement point options
     try:
-        # Retrieve measurement point options using the correct XPath.
         measurement_point_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[2]")))
         measurement_point_dropdown.click()
         measurement_point_options = wait.until(EC.presence_of_all_elements_located(
             (By.XPATH, "//ul[@id='MeasurePointDropDownList_listbox']/li")))
         measurement_point_names = [option.text.strip() for option in measurement_point_options if option.text.strip()]
-        measurement_point_dropdown.click()  # Collapse dropdown.
+        measurement_point_dropdown.click()  # collapse dropdown
         logger.info(f"For network '{network}', found {len(measurement_point_names)} measurement points: {measurement_point_names}")
     except Exception as e:
         logger.error(f"Error retrieving measurement points for network '{network}': {e}")
@@ -248,12 +260,12 @@ for network in network_names:
     
     if measurement_point_names:
         for measurement_point in measurement_point_names:
-            retries = 0
-            max_retries = 3
+            network_retries = 0
+            max_network_retries = 3
             processed = False
-            while not processed and retries < max_retries:
+            while not processed and network_retries < max_network_retries:
                 try:
-                    logger.info(f"Processing measurement point: {measurement_point} for network: {network} (Attempt {retries+1}/{max_retries})")
+                    logger.info(f"Processing measurement point: {measurement_point} for network: {network} (Attempt {network_retries+1}/{max_network_retries})")
                     old_files = os.listdir(base_download_dir)
                     select_dropdown(2, measurement_point)
                     time.sleep(2)
@@ -261,15 +273,11 @@ for network in network_names:
                     set_date_input(end_date_str, start=False)
                     search_button = wait.until(EC.element_to_be_clickable((By.ID, "search")))
                     search_button.click()
-                    wait_for_loading(timeout=300, network_name=network)
-                    if not wait_for_data():
-                        logger.warning(f"No data loaded for measurement point '{measurement_point}' of network '{network}'.")
-                        skipped_items.append(f"{network} - {measurement_point}")
-                        processed = True
-                        break
+                    if not wait_for_loading(timeout=300, network_name=network):
+                        timeout_networks.append(f"{network} - {measurement_point}")
                     if not click_export_button():
                         logger.info(f"Skipping measurement point '{measurement_point}' for network '{network}' due to no export button.")
-                        skipped_items.append(f"{network} - {measurement_point}")
+                        skipped_networks.append(f"{network} - {measurement_point}")
                         processed = True
                         break
                     downloaded_file = wait_for_download(old_files)
@@ -277,37 +285,38 @@ for network in network_names:
                         new_file_path = os.path.join(base_download_dir, format_measurement_point_name(measurement_point))
                         shutil.move(downloaded_file, new_file_path)
                         logger.info(f"Renamed '{downloaded_file}' to '{new_file_path}'")
-                        downloaded_items.append(f"{network} - {measurement_point}")
+                        downloaded_networks.append(f"{measurement_point}")
                     else:
                         logger.info(f"No file downloaded for measurement point '{measurement_point}' of network '{network}'.")
-                        skipped_items.append(f"{network} - {measurement_point}")
+                        skipped_networks.append(f"{network} - {measurement_point}")
                     time.sleep(5)
                     processed = True
                 except WebDriverException as wde:
-                    retries += 1
+                    network_retries += 1
                     logger.warning(f"WebDriverException for measurement point '{measurement_point}' of network '{network}': {wde}. Reinitializing driver and retrying...")
                     reinitialize_driver()
                 except Exception as e:
                     logger.error(f"Exception for measurement point '{measurement_point}' of network '{network}': {e}. Skipping this combination.")
-                    skipped_items.append(f"{network} - {measurement_point}")
+                    skipped_networks.append(f"{network} - {measurement_point}")
                     processed = True
     else:
-        retries = 0
-        max_retries = 3
+        network_retries = 0
+        max_network_retries = 3
         processed = False
-        while not processed and retries < max_retries:
+        while not processed and network_retries < max_network_retries:
             try:
-                logger.info(f"Processing network: {network} with no measurement point (Attempt {retries+1}/{max_retries})")
+                logger.info(f"Processing network: {network} with no measurement point (Attempt {network_retries+1}/{max_network_retries})")
                 old_files = os.listdir(base_download_dir)
                 time.sleep(2)
                 set_date_input(start_date_str, start=True)
                 set_date_input(end_date_str, start=False)
                 search_button = wait.until(EC.element_to_be_clickable((By.ID, "search")))
                 search_button.click()
-                wait_for_loading(timeout=300, network_name=network)
+                if not wait_for_loading(timeout=300, network_name=network):
+                    timeout_networks.append(network)
                 if not click_export_button():
                     logger.info(f"Skipping network '{network}' due to no export button.")
-                    skipped_items.append(network)
+                    skipped_networks.append(network)
                     processed = True
                     break
                 downloaded_file = wait_for_download(old_files)
@@ -315,28 +324,32 @@ for network in network_names:
                     new_file_path = os.path.join(base_download_dir, f"PGB Daily Gas Movement - {network}.xlsx")
                     shutil.move(downloaded_file, new_file_path)
                     logger.info(f"Renamed '{downloaded_file}' to '{new_file_path}'")
-                    downloaded_items.append(network)
+                    downloaded_networks.append(network)
                 else:
                     logger.info(f"No file downloaded for network '{network}'.")
-                    skipped_items.append(network)
+                    skipped_networks.append(network)
                 time.sleep(5)
                 processed = True
             except WebDriverException as wde:
-                retries += 1
+                network_retries += 1
                 logger.warning(f"WebDriverException for network '{network}': {wde}. Reinitializing driver and retrying...")
                 reinitialize_driver()
             except Exception as e:
                 logger.error(f"Exception for network '{network}': {e}. Skipping network.")
-                skipped_items.append(network)
+                skipped_networks.append(network)
                 processed = True
 
+# ---------------------------------------------------------------------------
+# Log summary of the processing
 logger.info("\n=== Summary ===")
 logger.info(f"Total networks processed: {len(network_names)}")
-logger.info(f"Downloaded items count: {len(downloaded_items)}")
-logger.info(f"Skipped items count: {len(skipped_items)}")
-if downloaded_items:
+logger.info(f"Downloaded items count: {len(downloaded_networks)}")
+logger.info(f"Skipped items count: {len(skipped_networks)}")
+logger.info(f"Items with page load timeout: {len(timeout_networks)}")
+
+if downloaded_networks:
     logger.info("Downloaded measurement points:")
-    for item in downloaded_items:
+    for item in downloaded_networks:
         if " - " in item:
             mp = item.split(" - ")[1]
             logger.info(f" - {mp}")
@@ -344,12 +357,14 @@ if downloaded_items:
             logger.info(f" - {item}")
 else:
     logger.info("No items were downloaded.")
-if skipped_items:
+
+if skipped_networks:
     logger.info("Skipped items:")
-    for item in skipped_items:
+    for item in skipped_networks:
         logger.info(f" - {item}")
 else:
     logger.info("All items were downloaded successfully.")
+
 if timeout_networks:
     logger.info("Items that timed out on page load:")
     for item in timeout_networks:
@@ -360,6 +375,8 @@ else:
 driver.quit()
 logger.info("Driver quit. Script finished.")
 
+# ---------------------------------------------------------------------------
+# Compress downloaded files for GitHub Actions Artifact
 def compress_downloads_dir(directory, zip_filename):
     with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(directory):
@@ -371,4 +388,4 @@ def compress_downloads_dir(directory, zip_filename):
 
 zip_filename = os.path.join(base_local_dir, f"{current_month_folder}.zip")
 compress_downloads_dir(base_download_dir, zip_filename)
-logger.info("Artifact is ready.")
+logger.info("Artifact is ready. Use GitHub Actions 'upload-artifact' step to save the ZIP file.")
