@@ -122,20 +122,20 @@ def select_dropdown(dropdown_index, option_text):
                 raise Exception(f"Option '{option_text}' not found in dropdown {dropdown_index}")
             # Scroll the option into view.
             driver.execute_script("arguments[0].scrollIntoView(true);", target_option)
-            time.sleep(1)
+            time.sleep(3)
             # Try using ActionChains to click.
             try:
                 ActionChains(driver).move_to_element(target_option).click(target_option).perform()
             except Exception as e:
                 logger.info(f"ActionChains click failed for '{option_text}', trying JS click: {e}")
                 driver.execute_script("arguments[0].click();", target_option)
-            time.sleep(1)
+            time.sleep(3)
             if verify_selection(dropdown_index, option_text):
                 logger.info(f"Successfully selected: {option_text}")
                 return
         except Exception as e:
             logger.info(f"Attempt {attempt+1}: Failed to select '{option_text}', retrying... Exception: {e}")
-            time.sleep(2)
+            time.sleep(3)
     logger.error(f"Failed to select '{option_text}' after 3 attempts.")
 
 # ---------------------------------------------------------------------------
