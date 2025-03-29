@@ -86,7 +86,6 @@ init_driver()
 def login_and_navigate():
     try:
         driver.get("https://gms.gasmalaysia.com/pltgtm/cmd.openseal?openSEAL_ck=ViewHome")
-        # Retrieve credentials from environment variables (or use defaults for local testing)
         website_username = os.environ.get("WEBSITE_USERNAME", "pltadmin")
         website_password = os.environ.get("WEBSITE_PASSWORD", "pltadmin@2020")
         username_field = wait.until(EC.visibility_of_element_located((By.ID, "UserCtrl")))
@@ -205,6 +204,22 @@ def click_export_button():
         return False
 
 # ---------------------------------------------------------------------------
+# Clear measurement point dropdown to a default state (e.g., "All")
+def clear_measurement_point_selection():
+    try:
+        measurement_point_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[2]")))
+        measurement_point_dropdown.click()
+        time.sleep(1)
+        # Try to select an "All" option if available.
+        default_option = wait.until(EC.presence_of_element_located(
+            (By.XPATH, "//ul[@id='MeasurePointDropDownList_listbox']/li[contains(text(), 'All')]")
+        ))
+        default_option.click()
+        logger.info("Cleared measurement point selection to default 'All'.")
+    except Exception as e:
+        logger.error(f"Failed to clear measurement point selection: {e}")
+
+# ---------------------------------------------------------------------------
 # Calculate dynamic date range using Malaysia time zone
 malaysia_tz = ZoneInfo("Asia/Kuala_Lumpur")
 now_in_malaysia = datetime.now(malaysia_tz)
@@ -250,7 +265,8 @@ for network in network_names:
         measurement_point_dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "(//span[@class='k-input'])[2]")))
         measurement_point_dropdown.click()
         measurement_point_options = wait.until(EC.presence_of_all_elements_located(
-            (By.XPATH, "//ul[@id='MeasurePointDropDownList_listbox']/li")))
+            (By.XPATH, "//ul[@id='MeasurePointDropDownList_listbox']/li")
+        ))
         measurement_point_names = [option.text.strip() for option in measurement_point_options if option.text.strip()]
         measurement_point_dropdown.click()  # collapse dropdown
         logger.info(f"For network '{network}', found {len(measurement_point_names)} measurement points: {measurement_point_names}")
@@ -308,6 +324,8 @@ for network in network_names:
                 logger.info(f"Processing network: {network} with no measurement point (Attempt {network_retries+1}/{max_network_retries})")
                 old_files = os.listdir(base_download_dir)
                 time.sleep(2)
+                # Clear any previous measurement point selection to avoid stale data
+                clear_measurement_point_selection()
                 set_date_input(start_date_str, start=True)
                 set_date_input(end_date_str, start=False)
                 search_button = wait.until(EC.element_to_be_clickable((By.ID, "search")))
