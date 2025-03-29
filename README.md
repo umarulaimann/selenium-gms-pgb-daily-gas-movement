@@ -1,8 +1,4 @@
-# selenium-gms-pgb-daily-gas-movement
-This repository is the automation for scheduled download selenium GMS PGB Daily Gas Movement
-
-# Selenium GMS PGB Daily Gas Movement Downloader
-
+# Selenium GMS PGB Daily Gas Movement
 This project automates the process of downloading and organizing data from the Gas Malaysia website’s "PGB Daily Gas Movement" section. The Python script uses Selenium WebDriver to log in, navigate dynamic dropdowns, set a dynamic date range, download Excel files for various networks and measurement points, rename the files appropriately, and finally compress them into a ZIP archive for artifact retrieval.
 
 ## Features
